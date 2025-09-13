@@ -2,6 +2,7 @@ import { serve } from "bun";
 import Stripe from "stripe";
 
 import landingPage from "./pages/index.html";
+import { queries } from "./db/queries";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY!;
 
@@ -21,14 +22,50 @@ serve({
 				});
 			},
 		},
-		"/api/v1/checkout": async (_req) => {
+		"/api/v1/checkout": async (req) => {
+			const { id } = await req.body?.json();
+
+			// user-auth (usually happens in middleware)
+			const user: any = queries.getUserbyId.get({
+				$id: id,
+			});
+			if (!user) {
+				return Response.json({ success: false }, 401);
+			}
+
+			// stripe customer_id
+			let customerId = queries.getCustomerByUserId.get({
+				$user_id: user.id,
+			}) as string;
+
+			if (!customerId) {
+				// if striper customer does not exist (if user is making first time payment)
+				// create a new stripe customer
+				const newCustomer = await stripe.customers.create({
+					email: user.email,
+					metadata: {
+						userId: user.id,
+					},
+				});
+
+				// store the relation b/w user_id and customer_id in DB
+				// preferably a KV store
+				queries.createCustomer.run({
+					$customer_id: newCustomer.id,
+					$user_id: user.id,
+				});
+				customerId = newCustomer.id;
+			}
+
 			const session = await stripe.checkout.sessions.create({
+				customer: customerId, // autofills the customer details for existing customers
 				mode: "payment",
+				currency: "inr",
 				line_items: [
 					{
 						price_data: {
 							currency: "inr",
-							unit_amount: 69 * 100, // (x * 100) cents = x dollars
+							unit_amount: 69 * 100, // (x * 100) paise = x rs
 							product_data: {
 								name: "Kitty Sub",
 								description: "meow meow meow",
@@ -42,7 +79,6 @@ serve({
 			});
 
 			const redirectUrl = session.url;
-
 			if (!redirectUrl) {
 				throw new Error("Stripe checkout session url not present");
 			}
@@ -53,6 +89,12 @@ serve({
 	port: 42069,
 	error(error) {
 		console.error(error);
-		return new Response("Internal Server Error", { status: 500 });
+		return Response.json(
+			{
+				success: false,
+				message: "Internal Server Error",
+			},
+			500,
+		);
 	},
 });
