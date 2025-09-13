@@ -1,6 +1,7 @@
 import { serve } from "bun";
 import Stripe from "stripe";
 
+import landingPage from "./pages/index.html";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY!;
 
@@ -10,6 +11,7 @@ const stripe = new Stripe(STRIPE_SECRET_KEY, {
 
 serve({
 	routes: {
+		"/": landingPage,
 		"/api/v1/meow": {
 			GET: () => {
 				const message = "Hello kitty";
