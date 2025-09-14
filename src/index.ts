@@ -1,4 +1,4 @@
-import { serve } from "bun";
+import { serve, type BunRequest } from "bun";
 import Stripe from "stripe";
 
 import landingPage from "./pages/index.html";
@@ -100,6 +100,36 @@ serve({
 
 			return Response.redirect(redirectUrl, 302);
 		},
+		"/api/v1/success": {
+			GET: async (req: BunRequest) => {
+				const query = new URL(req.url).searchParams;
+				const sessionId = query.get("sessionId");
+				if (!sessionId) {
+					return Response.json(
+						{
+							success: false,
+							message:
+								"[STRIPE REDIRECT] doesn't contain checkout session id",
+						},
+						400,
+					);
+				}
+
+				const paymentSuccess = handlePayment(sessionId);
+
+				if (!paymentSuccess) {
+					return Response.json(
+						{
+							success: false,
+							message: "[STRIPE REDIRECT] payment not completed",
+						},
+						403,
+					);
+				}
+
+				return Response.redirect(BASE_URL, 303);
+			},
+		},
 	},
 	port: 42069,
 	error(error) {
@@ -113,3 +143,40 @@ serve({
 		);
 	},
 });
+
+async function handlePayment(stripeSessionId: string) {
+	const session = await stripe.checkout.sessions.retrieve(stripeSessionId, {
+		expand: ["line_items"],
+	});
+	if (session.payment_status === "unpaid") {
+		console.error("[STRIPE PAYMENT FULFILL], payment not done yet");
+		return false;
+	}
+
+	console.info("[STRIPE CHECKOUT SESSION]:", session);
+
+	const userId = session.metadata?.userId;
+	if (!userId) {
+		console.error(
+			"[STRIPE PAYMENT FULFILL], user id not present for order",
+		);
+		return false;
+	}
+
+	if (session.line_items?.data[0]?.quantity === null) {
+		console.error("[STRIPE PAYMENT FULFILL], no quantity for the order");
+		return false;
+	}
+
+	const amountPaid = session.line_items?.data[0]?.amount_total!;
+
+	queries.createSubscription.run({
+		$user_id: userId,
+		$stripe_customer_id: session.customer as string,
+		$stripe_session_id: stripeSessionId,
+		$amount_rupees: amountPaid,
+		$status: "paid",
+	});
+
+	return true;
+}
