@@ -68,8 +68,7 @@ serve({
 
 			const session = await stripe.checkout.sessions.create({
 				customer: customerId, // autofills the customer details for existing customers
-				mode: "payment",
-				currency: "inr",
+				mode: "subscription",
 				line_items: [
 					{
 						price_data: {
@@ -102,30 +101,26 @@ serve({
 		},
 		"/api/v1/success": {
 			GET: async (req: BunRequest) => {
-				const query = new URL(req.url).searchParams;
-				const sessionId = query.get("sessionId");
-				if (!sessionId) {
-					return Response.json(
-						{
-							success: false,
-							message:
-								"[STRIPE REDIRECT] doesn't contain checkout session id",
-						},
-						400,
-					);
+				const { id: userId } = await req.body?.json();
+				// user-auth (usually happens in middleware)
+				const user: any = queries.getUserbyId.get({
+					$id: userId,
+				});
+				if (!user) {
+					return Response.json({ success: false }, 401);
+				}
+				console.info(user);
+
+				const stripeCustomer = queries.getCustomerByUserId.get({
+					$user_id: user.id,
+				});
+				let customerId = (stripeCustomer as any).customer_id;
+
+				if (!customerId) {
+					return Response.redirect(BASE_URL, 303);
 				}
 
-				const paymentSuccess = handlePayment(sessionId);
-
-				if (!paymentSuccess) {
-					return Response.json(
-						{
-							success: false,
-							message: "[STRIPE REDIRECT] payment not completed",
-						},
-						403,
-					);
-				}
+				await handlePayment(customerId);
 
 				return Response.redirect(BASE_URL, 303);
 			},
@@ -176,39 +171,45 @@ serve({
 	},
 });
 
-async function handlePayment(stripeSessionId: string) {
-	const session = await stripe.checkout.sessions.retrieve(stripeSessionId, {
-		expand: ["line_items"],
-	});
-	if (session.payment_status === "unpaid") {
-		console.error("[STRIPE PAYMENT FULFILL], payment not done yet");
-		return false;
-	}
-
-	console.info("[STRIPE CHECKOUT SESSION]:", session);
-
-	const userId = session.metadata?.userId;
-	if (!userId) {
-		console.error(
-			"[STRIPE PAYMENT FULFILL], user id not present for order",
-		);
-		return false;
-	}
-
-	if (session.line_items?.data[0]?.quantity === null) {
-		console.error("[STRIPE PAYMENT FULFILL], no quantity for the order");
-		return false;
-	}
-
-	const amountPaid = session.line_items?.data[0]?.amount_total!;
-
-	queries.createSubscription.run({
-		$user_id: userId,
-		$stripe_customer_id: session.customer as string,
-		$stripe_session_id: stripeSessionId,
-		$amount_rupees: amountPaid,
-		$status: "paid",
+async function handlePayment(customerId: string) {
+	const subscriptions = await stripe.subscriptions.list({
+		customer: customerId,
+		limit: 1,
+		status: "all",
+		expand: ["data.default_payment_method"],
 	});
 
-	return true;
+	if (subscriptions.data.length === 0) {
+		console.error("[STRIPE SUBSCRIPTION], no active subscription");
+		const subData = { status: "none" };
+		return subData;
+	}
+
+	// to maintain own sanity
+	// don't have more than one subscription
+	const subscription = subscriptions.data[0]!;
+	console.info("[STRIPE SUBSCRIPTION]:", subscription);
+
+	const subData = {
+		subscriptionId: subscription.id,
+		status: subscription.status,
+		priceId: subscription.items.data[0]?.price.id,
+		cancelAtPeriodEnd: subscription.cancel_at_period_end,
+		paymentMethod:
+			subscription.default_payment_method &&
+			typeof subscription.default_payment_method !== "string"
+				? {
+						brand:
+							subscription.default_payment_method.card?.brand ??
+							null,
+						last4:
+							subscription.default_payment_method.card?.last4 ??
+							null,
+					}
+				: null,
+	};
+
+	// TODO: create a better table to store this subscription data.
+
+	return subData;
 }
