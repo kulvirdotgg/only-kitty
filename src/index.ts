@@ -149,9 +149,9 @@ serve({
 				);
 
 				if (event.type === "checkout.session.completed") {
-					const { customer: customerId } = event.data.object;
+					const { id } = event.data.object;
 
-					const success = await handlePayment(customerId as string);
+					const success = await handlePayment(id);
 
 					if (!success) {
 						console.error("[STRIPE HOOK] Error processing event");
