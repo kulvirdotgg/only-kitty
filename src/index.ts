@@ -98,7 +98,7 @@ serve({
 				throw new Error("Stripe checkout session url not present");
 			}
 
-			return Response.redirect(redirectUrl, 302);
+			return Response.redirect(redirectUrl, 303);
 		},
 		"/api/v1/success": {
 			GET: async (req: BunRequest) => {
@@ -128,6 +128,38 @@ serve({
 				}
 
 				return Response.redirect(BASE_URL, 303);
+			},
+		},
+		"/api/v1/webhook/stripe": {
+			POST: async (req: BunRequest) => {
+				const body = await req.body?.text()!;
+				const signature = req.headers.get("Stripe-Signature");
+
+				if (!signature) {
+					console.error(
+						"[STRIPE WEBHOOK] no signature present in the request",
+					);
+					return new Response(null, { status: 400 });
+				}
+
+				const event = stripe.webhooks.constructEvent(
+					body,
+					signature,
+					STRIPE_SECRET_KEY,
+				);
+
+				if (event.type === "checkout.session.completed") {
+					const { customer: customerId } = event.data.object;
+
+					const success = await handlePayment(customerId as string);
+
+					if (!success) {
+						console.error("[STRIPE HOOK] Error processing event");
+						return new Response(null, { status: 400 });
+					}
+				}
+
+				return new Response(null, { status: 200 });
 			},
 		},
 	},
