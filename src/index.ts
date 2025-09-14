@@ -5,10 +5,14 @@ import landingPage from "./pages/index.html";
 import { queries } from "./db/queries";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY!;
+const BASE_URL = process.env.BASE_URL!;
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, {
 	apiVersion: "2025-08-27.basil",
 });
+
+const SUCCESS_URL = `${BASE_URL}/api/v1/success?sessionId={CHECKOUT_SESSION_ID}`;
+const CANCEL_URL = `${BASE_URL}/api/v1/cancel`;
 
 serve({
 	routes: {
@@ -32,11 +36,13 @@ serve({
 			if (!user) {
 				return Response.json({ success: false }, 401);
 			}
+			console.info(user);
 
 			// stripe customer_id
-			let customerId = queries.getCustomerByUserId.get({
+			const stripeCustomer = queries.getCustomerByUserId.get({
 				$user_id: user.id,
-			}) as string;
+			});
+			let customerId = (stripeCustomer as any).customer_id;
 
 			if (!customerId) {
 				// if striper customer does not exist (if user is making first time payment)
@@ -47,6 +53,7 @@ serve({
 						userId: user.id,
 					},
 				});
+				console.info("newly created stripe customer: %o", newCustomer);
 
 				// store the relation b/w user_id and customer_id in DB
 				// preferably a KV store
@@ -56,6 +63,8 @@ serve({
 				});
 				customerId = newCustomer.id;
 			}
+
+			console.info("stripe customer Id: [%s]", customerId);
 
 			const session = await stripe.checkout.sessions.create({
 				customer: customerId, // autofills the customer details for existing customers
@@ -68,15 +77,21 @@ serve({
 							unit_amount: 69 * 100, // (x * 100) paise = x rs
 							product_data: {
 								name: "Kitty Sub",
-								description: "meow meow meow",
+								description: "meow meow meow meow",
 							},
 						},
 						quantity: 1,
 					},
 				],
-				success_url: "http://localhost:42069",
-				cancel_url: "http://localhost:42069",
+				metadata: {
+					productId: "kitty-42069", // product id for which user is making a purchase
+					userId: user.id,
+				},
+				success_url: SUCCESS_URL,
+				cancel_url: CANCEL_URL,
 			});
+
+			console.info("stripe session\n", session);
 
 			const redirectUrl = session.url;
 			if (!redirectUrl) {
