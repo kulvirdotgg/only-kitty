@@ -22,13 +22,16 @@ function createTables() {
 			)`);
 
 	db.run(`
-		CREATE TABLE IF NOT EXISTS checkouts (
+		CREATE TABLE IF NOT EXISTS subscriptions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-			customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+			stripe_customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
 			stripe_session_id TEXT UNIQUE,
-			amount INTEGER NOT NULL,
-			state TEXT NOT NULL DEFAULT 'INITIATED',
+			plan_id TEXT NOT NULL DEFAULT "kitty_pics",
+			amount_rupees INTEGER NOT NULL,
+			status TEXT NOT NULL CHECK (
+				status IN ('unpaid','paid','canceled')
+			),
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
 }

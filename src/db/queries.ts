@@ -12,11 +12,8 @@ export const queries = {
 	getCustomerByUserId: db.query(
 		"SELECT * FROM customers WHERE user_id = $user_id",
 	),
-	createCheckout: db.query(
-		"INSERT INTO checkouts (user_id, customer_id, stripe_session_id, amount, state)\
-		VALUES ($user_id, $customer_id, $stripe_session_id, $amount, $state) ",
-	),
-	getCheckoutByUser: db.query(
-		" SELECT * FROM checkouts WHERE user_id = $user_id ",
+	createSubscription: db.query(
+		"INSERT INTO subscriptions (user_id, stripe_customer_id, stripe_session_id, amount_rupees, status)\
+		VALUES ($user_id, $stripe_customer_id, $stripe_session_id, $amount_rupees, $status)",
 	),
 };
